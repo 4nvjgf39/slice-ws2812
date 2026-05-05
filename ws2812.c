@@ -326,7 +326,7 @@ ssize_t ws2812_write(struct file *filp, const char __user *buf, size_t count, lo
 	/* Fill rest with '0' */
 	memset(p_buffer, 0x00, RESET_BYTES);
 
-	length = (p_buffer - state->buffer) + RESET_BYTES;
+	length = (int)((uintptr_t)p_buffer - (uintptr_t)state->buffer) + RESET_BYTES;
 
 	/* Setup DMA engine */
 	issue_dma(state, state->buffer, length);
