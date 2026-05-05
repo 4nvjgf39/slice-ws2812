@@ -188,13 +188,11 @@ int issue_dma(struct ws2812_state * state, uint8_t *buffer, int length)
 {
 	struct dma_async_tx_descriptor *desc;
 
-	state->dma_addr = dma_map_single(state->dev,
-		buffer, length,
-		DMA_TO_DEVICE);
+	state->dma_addr = dma_map_single(state->dev, buffer, length, DMA_TO_DEVICE);
 
-	if(state->dma_addr == 0)
+	if(dma_mapping_error(state->dev, state->dma_addr))
 	{
-		pr_err("Failed to map buffer for DMA\n");
+		dev_err(state->dev, "Failed to map buffer for DMA\n");
 		return -1;
 	}
 
@@ -202,7 +200,7 @@ int issue_dma(struct ws2812_state * state, uint8_t *buffer, int length)
 		length, DMA_TO_DEVICE, DMA_PREP_INTERRUPT);
 	if(desc == NULL)
 	{
-		pr_err("Failed to prep the DMA transfer\n");
+		dev_err(state->dev, "Failed to prep the DMA transfer\n");
 		return -1;
 	}
 
@@ -328,7 +326,7 @@ ssize_t ws2812_write(struct file *filp, const char __user *buf, size_t count, lo
 	/* Fill rest with '0' */
 	memset(p_buffer, 0x00, RESET_BYTES);
 
-	length = (int) p_buffer - (int) state->buffer + RESET_BYTES;
+	length = (p_buffer - state->buffer) + RESET_BYTES;
 
 	/* Setup DMA engine */
 	issue_dma(state, state->buffer, length);
@@ -451,18 +449,20 @@ static int ws2812_probe(struct platform_device *pdev)
 		goto fail_pixbuf;
 	}
 
-	state->dma_chan = dma_request_slave_channel(dev, "pwm_dma");
-	if(state->dma_chan == NULL)
+	state->dma_chan = dma_request_chan(dev, "pwm_dma");
+	if(IS_ERR(state->dma_chan))
 	{
-		pr_err("Failed to request DMA channel");
+		dev_err(dev, "Failed to request DMA channel: %ld\n", PTR_ERR(state->dma_chan));
+		state->dma_chan = NULL;
 		goto fail_buffer;
 	}
 
 	/* request a DMA channel */
 	cfg.dst_addr = state->phys_addr + PWM_FIFO1;
 	ret = dmaengine_slave_config(state->dma_chan, &cfg);
-	if (state->dma_chan < 0) {
-		pr_err("Can't allocate DMA channel\n");
+	if (ret < 0)
+	{
+		dev_err(dev, "DMA slave config failed: %d\n", ret);
 		goto fail_dma_init;
 	}
 	pwm_init(state);
