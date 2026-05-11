@@ -2,7 +2,7 @@
 /plugin/;
 
 / {
-  compatible = "brcm,bcm2708";
+  compatible = "brcm,bcm2711";
 
   // disable pwm
   fragment@0 {
@@ -22,8 +22,8 @@
         compatible = "rpi,ws2812";
         pinctrl-names = "default";
         pinctrl-0 = <&pwm1_0_gpio40>;
-        reg = <0x7e20c000 0x100>; /* PWM */
-        dmas = <&dma 5>;
+        reg = <0x7e20c800 0x100>; /* PWM */
+        dmas = <&dma 1>;
         dma-names = "pwm_dma";
         led-en-gpios = <&gpio 43 0>;
 
