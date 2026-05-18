@@ -515,7 +515,7 @@ static void ws2812_remove(struct platform_device *pdev)
 	
 	if (!state)
 	{
-		return 0;
+		return;
 	}
 
 	platform_set_drvdata(pdev, NULL);
