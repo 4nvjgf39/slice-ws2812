@@ -53,15 +53,10 @@
 
 #include <linux/kernel.h>
 #include <linux/module.h>
-#include <linux/fcntl.h>
-#include <linux/file.h>
 #include <linux/fs.h>
-#include <linux/wait.h>
 #include <linux/io.h>
 #include <linux/ioctl.h>
 #include <linux/cdev.h>
-#include <linux/delay.h>
-#include <linux/interrupt.h>
 #include <linux/dma-mapping.h>
 #include <linux/dmaengine.h>
 #include <linux/slab.h>
@@ -70,6 +65,7 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/gpio/consumer.h>
+#include <linux/version.h>
 #include <asm-generic/ioctl.h>
 
 #define DRIVER_NAME "ws2812"
@@ -120,7 +116,7 @@ struct ws2812_state {
 
 #define PWM_DMA_DREQ 5
 
-static dev_t devid = MKDEV(1337, 0);
+static dev_t devid;
 
 /*
 ** Functions to access the pwm peripheral
@@ -316,7 +312,9 @@ ssize_t ws2812_write(struct file *filp, const char __user *buf, size_t count, lo
 	num_leds = min(count/4, state->num_leds);
 
 	if(copy_from_user(state->pixbuf, buf, num_leds * 4))
+	{
 		return -EFAULT;
+	}
 
 	p_rgb = state->pixbuf;
 	p_buffer = state->buffer;
@@ -329,7 +327,10 @@ ssize_t ws2812_write(struct file *filp, const char __user *buf, size_t count, lo
 	length = (int)((uintptr_t)p_buffer - (uintptr_t)state->buffer) + RESET_BYTES;
 
 	/* Setup DMA engine */
-	issue_dma(state, state->buffer, length);
+	if (issue_dma(state, state->buffer, length) < 0)
+	{
+		return -EIO;
+	}
 
 	return count;
 }
@@ -366,13 +367,14 @@ static int ws2812_probe(struct platform_device *pdev)
 
 	if(node == NULL)
 	{
-		pr_err("Require device tree entry\n");
+		dev_err(dev, "Require device tree entry\n");
 		goto fail;
 	}
 
-	state = kmalloc(sizeof(struct ws2812_state), GFP_KERNEL);
-	if (!state) {
-		pr_err("Can't allocate state\n");
+	state = devm_kmalloc(dev, sizeof(struct ws2812_state), GFP_KERNEL);
+	if (!state)
+	{
+		dev_err(dev, "Can't allocate state\n");
 		goto fail;
 	}
 
@@ -382,20 +384,24 @@ static int ws2812_probe(struct platform_device *pdev)
 	// Create character device interface /dev/ws2812
 	if(alloc_chrdev_region(&devid, 0, 1, "ws2812") < 0)
 	{
-		pr_err("Unable to create chrdev region");
+		dev_err(dev, "Unable to create chrdev region");
 		goto fail_malloc;
 	}
-	if((state->cl = class_create("ws2812")) == NULL)
+	dev_info(dev, "Allocated device number %u: %u\n", MAJOR(devid), MINOR(devid));
+	
+	state->cl = class_create("ws2812");
+	if (IS_ERR(state->cl))
 	{
+		dev_err(dev, "Unable to create class ws2812");
 		unregister_chrdev_region(devid, 1);
-		pr_err("Unable to create class ws2812");
 		goto fail_chrdev;
-	}
+	}	
+	
 	if(device_create(state->cl, NULL, devid, NULL, "ws2812") == NULL)
 	{
 		class_destroy(state->cl);
 		unregister_chrdev_region(devid, 1);
-		pr_err("Unable to create device ws2812");
+		dev_err(dev, "Unable to create device ws2812");
 		goto fail_class;
 	}
 
@@ -403,7 +409,7 @@ static int ws2812_probe(struct platform_device *pdev)
 	cdev_init(&state->cdev, &ws2812_fops);
 
 	if(cdev_add(&state->cdev, devid, 1)) {
-		pr_err("CDEV failed\n");
+		dev_err(dev, "CDEV failed\n");
 		goto fail_device;
 	}
 
@@ -420,32 +426,35 @@ static int ws2812_probe(struct platform_device *pdev)
 	state->pixbuf = kmalloc(state->num_leds * sizeof(int), GFP_KERNEL);
 	if(state->pixbuf == NULL)
 	{
-		pr_err("Failed to allocate internal buffer\n");
+		dev_err(dev, "Failed to allocate internal buffer\n");
 		goto fail_cdev;
 	}
 
 	/* base address in dma-space */
 	addr = of_get_address(node, 0, NULL, NULL);
-	if (!addr) {
+	if (!addr)
+	{
 		dev_err(dev, "could not get DMA-register address - not using dma mode\n");
 		goto fail_pixbuf;
 	}
+	
 	state->phys_addr = be32_to_cpup(addr);
-	pr_err("bus_addr = %pa\n", &state->phys_addr);
+	dev_info(dev, "bus_addr = %pa\n", &state->phys_addr);
 
 	res = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	state->ioaddr = devm_ioremap_resource(&pdev->dev, res);
-	if (IS_ERR(state->ioaddr)) {
-                pr_err("Failed to get register resource\n");
+	if (IS_ERR(state->ioaddr))
+	{
+                dev_err(dev, "Failed to get register resource\n");
 		goto fail_pixbuf;
 	}
 
-	pr_err("ioaddr = 0x%x\n", (int) state->ioaddr);
+	dev_info(dev, "ioaddr = 0x%x\n", (int) state->ioaddr);
 
 	state->buffer = kmalloc(state->num_leds * BYTES_PER_LED + RESET_BYTES, GFP_KERNEL);
 	if(state->buffer == NULL)
 	{
-		pr_err("Failed to allocate internal buffer\n");
+		dev_err(dev, "Failed to allocate internal buffer\n");
 		goto fail_pixbuf;
 	}
 
@@ -469,6 +478,11 @@ static int ws2812_probe(struct platform_device *pdev)
 
 	// Enable the LED power
 	state->led_en = devm_gpiod_get(dev, "led-en", GPIOD_OUT_HIGH);
+	if (IS_ERR(state->led_en))
+	{
+		dev_err(dev, "Failed to get LED enable GPIO: %ld\n", PTR_ERR(state->led_en));
+		state->led_en = NULL;
+	}
 
 	clear_leds(state);
 
@@ -498,12 +512,29 @@ fail:
 static void ws2812_remove(struct platform_device *pdev)
 {
 	struct ws2812_state *state = platform_get_drvdata(pdev);
+	
+	if (!state)
+	{
+		return 0;
+	}
 
 	platform_set_drvdata(pdev, NULL);
 
-	dma_release_channel(state->dma_chan);
-	kfree(state->buffer);
-	kfree(state->pixbuf);
+	if (state->dma_chan)
+	{
+		dma_release_channel(state->dma_chan);	
+	}
+
+	if (state->buffer)
+	{
+		kfree(state->buffer);	
+	}
+	
+	if (state->pixbuf)
+	{
+		kfree(state->pixbuf);	
+	}
+
 	cdev_del(&state->cdev);
 	device_destroy(state->cl, devid);
 	class_destroy(state->cl);
