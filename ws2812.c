@@ -467,7 +467,7 @@ static int ws2812_probe(struct platform_device *pdev)
 	}
 
 	/* request a DMA channel */
-	cfg.dst_addr = state->phys_addr + PWM_FIFO1;
+	cfg.dst_addr = state->phys_addr + PWM_FIFO1 + BCM2835_VCMMU_SHIFT;
 	ret = dmaengine_slave_config(state->dma_chan, &cfg);
 	if (ret < 0)
 	{
