@@ -94,7 +94,10 @@ struct ws2812_state {
  #define BCM2708_PERI_BASE 0x20000000
 #endif
 
-#define BCM2835_VCMMU_SHIFT		(0x7E000000 - BCM2708_PERI_BASE)
+/* CM3 (BCM2837) ARM physical peripheral base; DMA needs the physical
+ * address here, not the VideoCore bus address used elsewhere. */
+#define CM3_PERI_PHYS_BASE		0x3f000000
+#define BCM2835_BUS_BASE		0x7e000000
 
 /* Each LED is controlled with a 24 bit RGB value
  * each bit is created from a nibble of data either
@@ -467,7 +470,7 @@ static int ws2812_probe(struct platform_device *pdev)
 	}
 
 	/* request a DMA channel */
-	cfg.dst_addr = state->phys_addr + PWM_FIFO1 + BCM2835_VCMMU_SHIFT;
+	cfg.dst_addr = state->phys_addr - BCM2835_BUS_BASE + CM3_PERI_PHYS_BASE + PWM_FIFO1;
 	ret = dmaengine_slave_config(state->dma_chan, &cfg);
 	if (ret < 0)
 	{
@@ -522,6 +525,7 @@ static void ws2812_remove(struct platform_device *pdev)
 
 	if (state->dma_chan)
 	{
+		dmaengine_terminate_sync(state->dma_chan);
 		dma_release_channel(state->dma_chan);	
 	}
 
