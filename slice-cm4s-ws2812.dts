@@ -29,7 +29,7 @@
 
         rpi,invert = <1>;
         rpi,num_leds = <25>;
-        rpi,phys_addr = <0xfe000000>;
+        rpi,peri_phys_base = <0xfe000000>;
 
         status = "okay";
 

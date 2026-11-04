@@ -94,9 +94,6 @@ struct ws2812_state {
  #define BCM2708_PERI_BASE 0x20000000
 #endif
 
-/* CM3 (BCM2837) ARM physical peripheral base; DMA needs the physical
- * address here, not the VideoCore bus address used elsewhere. */
-#define CM3_PERI_PHYS_BASE		0x3f000000
 #define BCM2835_BUS_BASE		0x7e000000
 
 /* Each LED is controlled with a 24 bit RGB value
@@ -367,6 +364,11 @@ static int ws2812_probe(struct platform_device *pdev)
 		.direction = DMA_MEM_TO_DEV,
 		.src_addr = 0,
 	};
+	
+	/* CM3 (BCM2837) ARM physical peripheral base; DMA needs the physical
+	* address here, not the VideoCore bus address used elsewhere. 
+	* load the address from the device tree in the probe function */
+	phys_addr_t peri_phys_base;
 
 	if(node == NULL)
 	{
@@ -419,12 +421,9 @@ static int ws2812_probe(struct platform_device *pdev)
 	platform_set_drvdata(pdev, state);
 
 	/* get parameters from device tree */
-	of_property_read_u32(node,
-	                     "rpi,invert",
-	                     &state->invert);
-	of_property_read_u32(node,
-	                     "rpi,num_leds",
-	                     &state->num_leds);
+	of_property_read_u32(node, "rpi,invert", &state->invert);
+	of_property_read_u32(node, "rpi,num_leds", &state->num_leds);
+        of_property_read_u32(node, "rpi,peri_phys_base", (u32 *)&peri_phys_base);
 
 	state->pixbuf = kmalloc(state->num_leds * sizeof(int), GFP_KERNEL);
 	if(state->pixbuf == NULL)
@@ -470,7 +469,7 @@ static int ws2812_probe(struct platform_device *pdev)
 	}
 
 	/* request a DMA channel */
-	cfg.dst_addr = state->phys_addr - BCM2835_BUS_BASE + CM3_PERI_PHYS_BASE + PWM_FIFO1;
+	cfg.dst_addr = state->phys_addr - BCM2835_BUS_BASE + peri_phys_base + PWM_FIFO1;
 	ret = dmaengine_slave_config(state->dma_chan, &cfg);
 	if (ret < 0)
 	{
